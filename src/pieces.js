@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { createModelPiece } from './models.js';
 
 // White plays silver, black plays gold. Both are mirror-polished metal, so they
 // rely on the scene's environment map for their reflections.
@@ -286,6 +287,10 @@ const geometryCache = {};
 
 /** Builds a piece (`type` is p/n/b/r/q/k, `color` is w/b) standing at the origin. */
 export function createPiece(type, color) {
+  // Prefer the sculpted models; the shapes built here are the fallback.
+  const sculpted = createModelPiece(type, color, MATERIALS[color]);
+  if (sculpted) return sculpted;
+
   const geometries = (geometryCache[type] ??= BUILDERS[type]());
   const piece = new THREE.Group();
   for (const entry of geometries) {

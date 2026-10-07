@@ -3,6 +3,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { Chess } from 'chess.js';
 import { createPiece } from './pieces.js';
+import { loadPieceModels } from './models.js';
 import { createSpace } from './space.js';
 
 const MIN_THINK_MS = 500;
@@ -77,80 +78,56 @@ function squareToPosition(square) {
   return new THREE.Vector3(file - 3.5, 0, 3.5 - rank);
 }
 
-// A glass board: see-through tiles separated by glowing grid lines, resting on
-// a clear slab with a luminous rim.
+// A glass board: tiles of real refracting glass, lightly frosted for the light
+// squares and smoky black for the dark ones, resting on a clear slab.
 function createBoard() {
-  const GLOW = 0x7fdcff;
-  const glowMaterial = new THREE.MeshBasicMaterial({ color: GLOW, toneMapped: false });
-
-  // Tiles are slightly smaller than a square, leaving a gap for the grid lines.
-  const tile = new THREE.BoxGeometry(0.95, 0.06, 0.95);
+  // Bevel-like gap between tiles: their edges catch the light, which is what
+  // separates one square from the next.
+  const tile = new THREE.BoxGeometry(0.97, 0.08, 0.97);
   for (let file = 0; file < 8; file++) {
     for (let rank = 0; rank < 8; rank++) {
       const dark = (file + rank) % 2 === 0;
       const mesh = new THREE.Mesh(
         tile,
-        // Frosted ice for light squares, smoky sapphire for dark ones. Both stay
-        // opaque enough to tell apart against a bright nebula.
-        new THREE.MeshStandardMaterial({
-          color: dark ? 0x13224d : 0xd8ecff,
-          transparent: true,
-          opacity: dark ? 0.5 : 0.62,
-          roughness: dark ? 0.15 : 0.35,
-          metalness: 0.1,
-          envMapIntensity: 0.6,
-          depthWrite: false,
+        new THREE.MeshPhysicalMaterial({
+          // Transmitted light is multiplied by the colour, so a mid grey gives
+          // smoky black glass that still lets the sky through.
+          color: dark ? 0x7c7c86 : 0xffffff,
+          transmission: dark ? 0.95 : 0.98,
+          roughness: dark ? 0.03 : 0.1,
+          thickness: 0.2,
+          ior: 1.2,
+          // Kept low: strong reflections turn the board grey at shallow angles.
+          specularIntensity: 0.5,
+          envMapIntensity: 0.15,
         }),
       );
       const square = squareName(file, rank);
-      mesh.position.copy(squareToPosition(square)).setY(-0.03);
+      mesh.position.copy(squareToPosition(square)).setY(-0.04);
       mesh.receiveShadow = true;
-      mesh.renderOrder = 1;
       mesh.userData.square = square;
       squareMeshes.set(square, mesh);
       boardGroup.add(mesh);
     }
   }
 
-  // Grid lines in the gaps, with a heavier line around the playing area.
-  for (let i = 0; i <= 8; i++) {
-    const edge = i === 0 || i === 8;
-    const width = edge ? 0.06 : 0.025;
-    const bar = new THREE.BoxGeometry(8 + width, 0.03, width);
-    const alongX = new THREE.Mesh(bar, glowMaterial);
-    alongX.position.set(0, -0.03, i - 4);
-    const alongZ = new THREE.Mesh(bar, glowMaterial);
-    alongZ.position.set(i - 4, -0.03, 0);
-    alongZ.rotation.y = Math.PI / 2;
-    boardGroup.add(alongX, alongZ);
-  }
-
-  // Clear slab under the tiles, outlined so its edges catch the eye.
-  const slabGeometry = new THREE.BoxGeometry(9, 0.22, 9);
+  // Clear slab the tiles sit on, a little larger than the playing area.
   const slab = new THREE.Mesh(
-    slabGeometry,
-    new THREE.MeshStandardMaterial({
-      color: 0x9fd4ff,
-      transparent: true,
-      opacity: 0.16,
-      roughness: 0.05,
-      metalness: 0.2,
-      depthWrite: false,
+    new THREE.BoxGeometry(8.8, 0.2, 8.8),
+    new THREE.MeshPhysicalMaterial({
+      color: 0xffffff,
+      transmission: 1,
+      roughness: 0.03,
+      thickness: 0.3,
+      ior: 1.2,
+      specularIntensity: 0.5,
+      envMapIntensity: 0.15,
     }),
   );
-  slab.position.y = -0.18;
+  slab.position.y = -0.19;
   boardGroup.add(slab);
 
-  const outline = (geometry, opacity) =>
-    new THREE.LineSegments(
-      new THREE.EdgesGeometry(geometry),
-      new THREE.LineBasicMaterial({ color: GLOW, transparent: true, opacity, toneMapped: false }),
-    );
-  const slabOutline = outline(slabGeometry, 0.9);
-  slabOutline.position.copy(slab.position);
-  boardGroup.add(slabOutline);
-
-  const glow = new THREE.PointLight(0x4f8cff, 40, 20);
+  const glow = new THREE.PointLight(0xffffff, 25, 20);
   glow.position.y = -4.5;
   boardGroup.add(glow);
 }
@@ -621,4 +598,7 @@ renderer.setAnimationLoop((nowMs) => {
   renderer.render(scene, camera);
 });
 
-applyMode();
+statusEl.textContent = 'Loading pieces…';
+loadPieceModels()
+  .catch((error) => console.warn('Sculpted pieces failed to load; using built-in shapes.', error))
+  .then(applyMode);
