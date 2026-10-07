@@ -279,6 +279,9 @@ const BUILDERS = {
   ],
 };
 
+// Pieces are modelled to fill a square; this shrinks them for more breathing room.
+const PIECE_SCALE = 0.78;
+
 const geometryCache = {};
 
 /** Builds a piece (`type` is p/n/b/r/q/k, `color` is w/b) standing at the origin. */
@@ -288,6 +291,9 @@ export function createPiece(type, color) {
   for (const entry of geometries) {
     const geometry = entry.g ?? entry;
     const mesh = new THREE.Mesh(geometry, MATERIALS[entry.accent ? 'accent' : color]);
+    // Scaling each part (they all share the piece's origin) leaves the group's
+    // own scale free for the capture animation.
+    mesh.scale.setScalar(PIECE_SCALE);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     piece.add(mesh);

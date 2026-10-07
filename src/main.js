@@ -3,15 +3,16 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { Chess } from 'chess.js';
 import { createPiece } from './pieces.js';
+import { createSpace } from './space.js';
 
 const MIN_THINK_MS = 500;
 const CLICK_SLOP_PX = 6;
 
 const HIGHLIGHT = {
   none: 0x000000,
-  lastMove: 0x4a3d00,
-  selected: 0x0f5a3c,
-  check: 0x8a1010,
+  lastMove: 0xa07c00,
+  selected: 0x18a86c,
+  check: 0xd01414,
 };
 
 // ---------------------------------------------------------------- scene setup
@@ -52,20 +53,7 @@ sun.shadow.camera.far = 40;
 sun.shadow.bias = -0.0005;
 scene.add(sun);
 
-function createStars() {
-  const count = 2500;
-  const positions = new Float32Array(count * 3);
-  const p = new THREE.Vector3();
-  for (let i = 0; i < count; i++) {
-    p.randomDirection().multiplyScalar(60 + Math.random() * 80);
-    p.toArray(positions, i * 3);
-  }
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  const material = new THREE.PointsMaterial({ color: 0xcfdcff, size: 0.35, sizeAttenuation: true });
-  return new THREE.Points(geometry, material);
-}
-scene.add(createStars());
+const updateSpace = createSpace(scene);
 
 // ---------------------------------------------------------------------- board
 
@@ -89,44 +77,78 @@ function squareToPosition(square) {
   return new THREE.Vector3(file - 3.5, 0, 3.5 - rank);
 }
 
+// A glass board: see-through tiles separated by glowing grid lines, resting on
+// a clear slab with a luminous rim.
 function createBoard() {
-  const tile = new THREE.BoxGeometry(1, 0.1, 1);
+  const GLOW = 0x7fdcff;
+  const glowMaterial = new THREE.MeshBasicMaterial({ color: GLOW, toneMapped: false });
+
+  // Tiles are slightly smaller than a square, leaving a gap for the grid lines.
+  const tile = new THREE.BoxGeometry(0.95, 0.06, 0.95);
   for (let file = 0; file < 8; file++) {
     for (let rank = 0; rank < 8; rank++) {
       const dark = (file + rank) % 2 === 0;
       const mesh = new THREE.Mesh(
         tile,
+        // Frosted ice for light squares, smoky sapphire for dark ones. Both stay
+        // opaque enough to tell apart against a bright nebula.
         new THREE.MeshStandardMaterial({
-          color: dark ? 0x6f4e37 : 0xe6d3ac,
-          roughness: 0.6,
-          envMapIntensity: 0.25,
+          color: dark ? 0x13224d : 0xd8ecff,
+          transparent: true,
+          opacity: dark ? 0.5 : 0.62,
+          roughness: dark ? 0.15 : 0.35,
+          metalness: 0.1,
+          envMapIntensity: 0.6,
+          depthWrite: false,
         }),
       );
       const square = squareName(file, rank);
-      mesh.position.copy(squareToPosition(square)).setY(-0.05);
+      mesh.position.copy(squareToPosition(square)).setY(-0.03);
       mesh.receiveShadow = true;
+      mesh.renderOrder = 1;
       mesh.userData.square = square;
       squareMeshes.set(square, mesh);
       boardGroup.add(mesh);
     }
   }
 
-  const frame = new THREE.Mesh(
-    new THREE.BoxGeometry(9, 0.4, 9),
-    new THREE.MeshStandardMaterial({ color: 0x3b2a20, roughness: 0.5, envMapIntensity: 0.25 }),
-  );
-  frame.position.y = -0.3;
-  frame.receiveShadow = true;
-  boardGroup.add(frame);
+  // Grid lines in the gaps, with a heavier line around the playing area.
+  for (let i = 0; i <= 8; i++) {
+    const edge = i === 0 || i === 8;
+    const width = edge ? 0.06 : 0.025;
+    const bar = new THREE.BoxGeometry(8 + width, 0.03, width);
+    const alongX = new THREE.Mesh(bar, glowMaterial);
+    alongX.position.set(0, -0.03, i - 4);
+    const alongZ = new THREE.Mesh(bar, glowMaterial);
+    alongZ.position.set(i - 4, -0.03, 0);
+    alongZ.rotation.y = Math.PI / 2;
+    boardGroup.add(alongX, alongZ);
+  }
 
-  // Inverted pyramid of rock under the board, so it reads as a floating island.
-  const rock = new THREE.Mesh(
-    new THREE.ConeGeometry(4.5 * Math.SQRT2, 3.2, 4),
-    new THREE.MeshStandardMaterial({ color: 0x2b2f45, roughness: 0.9, flatShading: true }),
+  // Clear slab under the tiles, outlined so its edges catch the eye.
+  const slabGeometry = new THREE.BoxGeometry(9, 0.22, 9);
+  const slab = new THREE.Mesh(
+    slabGeometry,
+    new THREE.MeshStandardMaterial({
+      color: 0x9fd4ff,
+      transparent: true,
+      opacity: 0.16,
+      roughness: 0.05,
+      metalness: 0.2,
+      depthWrite: false,
+    }),
   );
-  rock.rotation.set(Math.PI, Math.PI / 4, 0);
-  rock.position.y = -2.1;
-  boardGroup.add(rock);
+  slab.position.y = -0.18;
+  boardGroup.add(slab);
+
+  const outline = (geometry, opacity) =>
+    new THREE.LineSegments(
+      new THREE.EdgesGeometry(geometry),
+      new THREE.LineBasicMaterial({ color: GLOW, transparent: true, opacity, toneMapped: false }),
+    );
+  const slabOutline = outline(slabGeometry, 0.9);
+  slabOutline.position.copy(slab.position);
+  boardGroup.add(slabOutline);
 
   const glow = new THREE.PointLight(0x4f8cff, 40, 20);
   glow.position.y = -4.5;
@@ -285,6 +307,7 @@ function refreshHighlights() {
     const marker = new THREE.Mesh(moves[0].captured ? captureMarker : quietMarker, markerMaterial);
     marker.position.copy(squareToPosition(square)).setY(0.02);
     marker.userData.square = square;
+    marker.renderOrder = 2;
     markersGroup.add(marker);
   }
 }
@@ -592,6 +615,7 @@ renderer.setAnimationLoop((nowMs) => {
   boardGroup.rotation.x = Math.sin(t * 0.5) * 0.012;
   boardGroup.rotation.z = Math.cos(t * 0.4) * 0.012;
 
+  updateSpace(t);
   stepTweens(dt);
   controls.update();
   renderer.render(scene, camera);
