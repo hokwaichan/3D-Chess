@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>3D Chess</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <canvas id="scene"></canvas>
+
+    <div id="hud">
+      <h1>3D Chess</h1>
+      <p id="status">Your move</p>
+      <label>
+        Mode
+        <select id="mode">
+          <option value="ai" selected>vs Computer</option>
+          <option value="local">Two players</option>
+          <option value="online">Online</option>
+        </select>
+      </label>
+      <label data-modes="ai">
+        Difficulty
+        <select id="level">
+          <option value="easy">Easy</option>
+          <option value="medium" selected>Medium</option>
+          <option value="hard">Hard</option>
+        </select>
+      </label>
+      <label data-modes="ai">
+        Play as
+        <select id="side">
+          <option value="w" selected>Silver</option>
+          <option value="b">Gold</option>
+        </select>
+      </label>
+      <form id="room-form" data-modes="online">
+        <input id="room" placeholder="Room code" maxlength="32" autocomplete="off" />
+        <button type="submit">Join</button>
+      </form>
+      <div class="buttons">
+        <button id="new-game">New game</button>
+        <button id="undo">Undo</button>
+      </div>
+    </div>
+
+    <p id="hint">Drag to look around · Scroll to zoom · Click a piece, then a highlighted square</p>
+
+    <div id="promotion" hidden>
+      <div class="dialog">
+        <p>Promote to</p>
+        <div class="buttons">
+          <button data-piece="q" title="Queen">♛</button>
+          <button data-piece="r" title="Rook">♜</button>
+          <button data-piece="b" title="Bishop">♝</button>
+          <button data-piece="n" title="Knight">♞</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
