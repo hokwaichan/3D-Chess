@@ -5,8 +5,10 @@ import { Chess } from 'chess.js';
 import { createPiece } from './pieces.js';
 import { loadPieceModels } from './models.js';
 import { createSpace } from './space.js';
+import { createOpponent } from './opponent.js';
 
-const MIN_THINK_MS = 500;
+// Long enough for the computer's avatar to be seen pondering.
+const MIN_THINK_MS = 900;
 const CLICK_SLOP_PX = 6;
 
 const HIGHLIGHT = {
@@ -55,6 +57,7 @@ sun.shadow.bias = -0.0005;
 scene.add(sun);
 
 const updateSpace = createSpace(scene);
+const opponent = createOpponent(scene);
 
 // ---------------------------------------------------------------------- board
 
@@ -155,10 +158,10 @@ function stepTweens(dt) {
   }
 }
 
-function slidePiece(piece, square, lift) {
+function slidePiece(piece, square, lift, seconds = 0.4) {
   const from = piece.position.clone();
   const to = squareToPosition(square);
-  return tween(0.4, (k) => {
+  return tween(seconds, (k) => {
     piece.position.lerpVectors(from, to, k);
     piece.position.y += Math.sin(Math.PI * k) * lift;
   });
@@ -229,6 +232,12 @@ function relocate(from, to) {
 async function animateMove(move) {
   animating = true;
 
+  // The computer's avatar picks its piece up before anything else happens.
+  const byHand = mode === 'ai' && move.color !== playerColor;
+  if (byHand) {
+    await opponent.grab(pieceAt.get(move.from), boardGroup.localToWorld(squareToPosition(move.to)));
+  }
+
   if (move.captured) {
     // En passant captures the pawn beside the mover, not on the target square.
     const capturedSquare = move.flags.includes('e') ? move.to[0] + move.from[1] : move.to;
@@ -241,7 +250,10 @@ async function animateMove(move) {
   if (move.flags.includes('q')) slidePiece(relocate('a' + rank, 'd' + rank), 'd' + rank, 0.2);
 
   const piece = relocate(move.from, move.to);
-  await slidePiece(piece, move.to, move.piece === 'n' ? 1.1 : 0.3);
+  // A carried piece is lifted clear of the others and travels at a hand's pace.
+  if (byHand) await slidePiece(piece, move.to, 1.1, 0.9);
+  else await slidePiece(piece, move.to, move.piece === 'n' ? 1.1 : 0.3);
+  if (byHand) opponent.release();
 
   if (move.promotion) {
     piecesGroup.remove(piece);
@@ -349,6 +361,16 @@ async function playMove(spec) {
   select(null);
   refreshStatus();
   await animateMove(move);
+  if (mode === 'ai') reactToMove(move);
+}
+
+// The computer's avatar gloats over its own good moves and scowls at yours.
+function reactToMove(move) {
+  const own = move.color !== playerColor;
+  if (chess.isCheckmate()) opponent.setMood(own ? 'laugh' : 'angry', Infinity);
+  else if (!own && (move.captured || chess.isCheck())) opponent.setMood('angry', 1.8);
+  else if (own && move.captured) opponent.setMood('laugh', 1.8);
+  else if (own && chess.isCheck()) opponent.setMood('grin', 2.5);
 }
 
 async function onSquareClicked(square) {
@@ -382,6 +404,7 @@ function requestComputerMove() {
   const id = ++searchId;
   const startedAt = performance.now();
   thinking = true;
+  opponent.setThinking(true);
   refreshStatus();
 
   worker.onmessage = async ({ data }) => {
@@ -391,6 +414,7 @@ function requestComputerMove() {
     if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
     if (id !== searchId) return;
     thinking = false;
+    opponent.setThinking(false);
     await playMove(data.move);
   };
   worker.postMessage({ id, fen: chess.fen(), level: levelEl.value });
@@ -400,6 +424,7 @@ function requestComputerMove() {
 function cancelComputerMove() {
   searchId++;
   thinking = false;
+  opponent.setThinking(false);
   startWorker();
 }
 
@@ -409,8 +434,15 @@ function resetView() {
   controls.enableDamping = false;
   controls.update();
   controls.enableDamping = true;
-  camera.position.set(0, 9, playerColor === 'w' ? 10 : -10);
-  controls.target.set(0, 0, 0);
+  const facing = playerColor === 'w' ? 1 : -1;
+  if (mode === 'ai') {
+    // Further back and aimed higher, to fit the avatar towering over the far side.
+    camera.position.set(0, 10.5, 16.5 * facing);
+    controls.target.set(0, 2.6, -1.5 * facing);
+  } else {
+    camera.position.set(0, 9, 10 * facing);
+    controls.target.set(0, 0, 0);
+  }
   controls.update();
 }
 
@@ -422,6 +454,7 @@ function newGame() {
   promotionEl.hidden = true;
   if (mode === 'ai') playerColor = sideEl.value;
   else if (mode === 'local') playerColor = 'w';
+  opponent.setSide(mode === 'ai' ? (playerColor === 'w' ? 'b' : 'w') : null);
   chess.reset();
   lastMove = null;
   rebuildPieces();
@@ -436,6 +469,7 @@ function newGame() {
 function undo() {
   if (mode === 'online' || animating || !promotionEl.hidden) return;
   cancelComputerMove();
+  opponent.reset();
   if (mode === 'local' || chess.turn() === playerColor) chess.undo();
   if (mode === 'ai') chess.undo();
   lastMove = chess.history({ verbose: true }).at(-1) ?? null;
@@ -594,6 +628,7 @@ renderer.setAnimationLoop((nowMs) => {
 
   updateSpace(t);
   stepTweens(dt);
+  opponent.update(t, dt);
   controls.update();
   renderer.render(scene, camera);
 });
